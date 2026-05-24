@@ -1,0 +1,6 @@
+service siengine_screenshare_rpmsg /system/bin/app_process64 /system --nice-name=siengine_screenshare_rpmsg siengine.com.screenshare.rpmsg.ScreenShareService
+    class main
+    user system
+    group system
+    capabilities NET_ADMIN NET_RAW
+    oneshot
