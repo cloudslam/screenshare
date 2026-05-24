@@ -1,0 +1,30 @@
+java_binary {
+    name: "siengine_screenshare_rpmsg",
+    srcs: ["src/ScreenShareService.java"],
+    static_libs: ["siengine_screenshare_aidl_java"],
+    init_rc: ["init.rc"],
+    platform_apis: true,
+    privileged: true,
+}
+
+aidl_interface {
+    name: "siengine_screenshare_aidl",
+    srcs: ["aidl/siengine/com/screenshare/rpmsg/IScreenShareService.aidl"],
+    backend: {
+        java: {
+            enabled: true,
+        },
+    },
+    unstable: true,
+}
+
+cc_library_shared {
+    name: "libsiengine_screenshare_native",
+    srcs: [
+        "src/seRpmsg/seRpmsg.cpp",
+        "src/seRpmsg/native_rpmsg.cpp",
+    ],
+    shared_libs: [
+        "liblog",
+    ],
+}
