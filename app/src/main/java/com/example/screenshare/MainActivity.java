@@ -1,34 +1,42 @@
 package com.example.screenshare;
 
-import android.app.ActivityOptions;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.content.ServiceConnection;
 import android.os.Bundle;
+import android.os.IBinder;
+import android.os.RemoteException;
 import android.text.TextUtils;
-import android.util.Log;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import siengine.com.screenshare.rpmsg.IScreenShareService;
+
 public class MainActivity extends AppCompatActivity {
-
-    private static final String TAG = "MainActivity";
-
-    static {
-        try {
-            System.loadLibrary("nativeRpmsg");
-            NativeRpmsgBridge.setLibraryLoaded(true);
-        } catch (UnsatisfiedLinkError e) {
-            Log.e(TAG, "Failed to load nativeRpmsg", e);
-            NativeRpmsgBridge.setLibraryLoaded(false);
-        }
-    }
 
     private EditText etPackage;
     private EditText etActivity;
     private EditText etDisplayId;
+
+    private IScreenShareService service;
+
+    private final ServiceConnection connection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder binder) {
+            service = IScreenShareService.Stub.asInterface(binder);
+            toast(getString(R.string.msg_service_connected));
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            service = null;
+            toast(getString(R.string.msg_service_disconnected));
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -39,18 +47,35 @@ public class MainActivity extends AppCompatActivity {
         etActivity = findViewById(R.id.etActivity);
         etDisplayId = findViewById(R.id.etDisplayId);
 
-        if (!NativeRpmsgBridge.init()) {
-            toast(getString(R.string.msg_rpmsg_init_failed));
-        }
-
         Button btnStart = findViewById(R.id.btnStart);
         Button btnStop = findViewById(R.id.btnStop);
 
         btnStart.setOnClickListener(v -> startProjection());
-        btnStop.setOnClickListener(v -> pullBackToMainDisplay());
+        btnStop.setOnClickListener(v -> stopProjection());
+
+        bindScreenShareService();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        unbindService(connection);
+    }
+
+    private void bindScreenShareService() {
+        Intent intent = new Intent();
+        intent.setComponent(new ComponentName(
+                "siengine.com.screenshare.rpmsg",
+                "siengine.com.screenshare.rpmsg.ScreenShareService"));
+        bindService(intent, connection, Context.BIND_AUTO_CREATE);
     }
 
     private void startProjection() {
+        if (service == null) {
+            toast(getString(R.string.msg_service_not_ready));
+            return;
+        }
+
         String pkg = safeText(etPackage);
         String activityPath = safeText(etActivity);
         String displayIdInput = safeText(etDisplayId);
@@ -66,68 +91,25 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        if (!NativeRpmsgBridge.start()) {
-            toast(getString(R.string.msg_rpmsg_start_failed));
-            return;
-        }
-
-        String className = normalizeActivityClassName(pkg, activityPath);
-
         try {
-            Intent intent = new Intent(Intent.ACTION_MAIN);
-            intent.addCategory(Intent.CATEGORY_LAUNCHER);
-            intent.setComponent(new ComponentName(pkg, className));
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
-            ActivityOptions options = ActivityOptions.makeBasic();
-            options.setLaunchDisplayId(displayId);
-
-            startActivity(intent, options.toBundle());
-            toast(getString(R.string.msg_start_success, displayId));
-        } catch (Exception e) {
+            boolean ok = service.enableScreenShare(pkg, activityPath, displayId);
+            toast(ok ? getString(R.string.msg_start_success, displayId) : getString(R.string.msg_start_failed, "rpmsg"));
+        } catch (RemoteException e) {
             toast(getString(R.string.msg_start_failed, e.getMessage()));
         }
     }
 
-    private void pullBackToMainDisplay() {
-        String pkg = safeText(etPackage);
-        String activityPath = safeText(etActivity);
-
-        if (TextUtils.isEmpty(pkg) || TextUtils.isEmpty(activityPath)) {
-            toast(getString(R.string.msg_fill_pkg_activity));
+    private void stopProjection() {
+        if (service == null) {
+            toast(getString(R.string.msg_service_not_ready));
             return;
         }
-
-        if (!NativeRpmsgBridge.stop()) {
-            toast(getString(R.string.msg_rpmsg_stop_failed));
-            return;
-        }
-
-        String className = normalizeActivityClassName(pkg, activityPath);
-
         try {
-            Intent intent = new Intent(Intent.ACTION_MAIN);
-            intent.addCategory(Intent.CATEGORY_LAUNCHER);
-            intent.setComponent(new ComponentName(pkg, className));
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-
-            ActivityOptions options = ActivityOptions.makeBasic();
-            options.setLaunchDisplayId(0);
-
-            startActivity(intent, options.toBundle());
-            toast(getString(R.string.msg_stop_success));
-        } catch (Exception e) {
+            boolean ok = service.disableScreenShare();
+            toast(ok ? getString(R.string.msg_stop_success) : getString(R.string.msg_stop_failed, "rpmsg"));
+        } catch (RemoteException e) {
             toast(getString(R.string.msg_stop_failed, e.getMessage()));
         }
-    }
-
-    private String normalizeActivityClassName(String packageName, String activityPath) {
-        if (activityPath.startsWith(".")) {
-            return packageName + activityPath;
-        }
-        return activityPath;
     }
 
     private Integer parseDisplayId(String value) {
@@ -145,61 +127,5 @@ public class MainActivity extends AppCompatActivity {
 
     private void toast(String message) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-    }
-
-    private static final class NativeRpmsgBridge {
-        private static boolean libraryLoaded;
-
-        private NativeRpmsgBridge() {
-        }
-
-        static void setLibraryLoaded(boolean loaded) {
-            libraryLoaded = loaded;
-        }
-
-        static boolean init() {
-            if (!libraryLoaded) {
-                Log.e(TAG, "nativeRpmsg is not loaded, init() skipped");
-                return false;
-            }
-            try {
-                return nativeInit();
-            } catch (UnsatisfiedLinkError e) {
-                Log.e(TAG, "nativeRpmsg init() call failed", e);
-                return false;
-            }
-        }
-
-        static boolean start() {
-            if (!libraryLoaded) {
-                Log.e(TAG, "nativeRpmsg is not loaded, start() skipped");
-                return false;
-            }
-            try {
-                return nativeStart();
-            } catch (UnsatisfiedLinkError e) {
-                Log.e(TAG, "nativeRpmsg start() call failed", e);
-                return false;
-            }
-        }
-
-        static boolean stop() {
-            if (!libraryLoaded) {
-                Log.e(TAG, "nativeRpmsg is not loaded, stop() skipped");
-                return false;
-            }
-            try {
-                return nativeStop();
-            } catch (UnsatisfiedLinkError e) {
-                Log.e(TAG, "nativeRpmsg stop() call failed", e);
-                return false;
-            }
-        }
-
-        private static native boolean nativeInit();
-
-        private static native boolean nativeStart();
-
-        private static native boolean nativeStop();
     }
 }

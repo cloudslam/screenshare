@@ -1,0 +1,9 @@
+type siengine_screenshare_rpmsg, domain;
+type siengine_screenshare_rpmsg_exec, exec_type, file_type;
+
+init_daemon_domain(siengine_screenshare_rpmsg)
+
+allow siengine_screenshare_rpmsg rpmsg_device:chr_file rw_file_perms;
+allow siengine_screenshare_rpmsg self:capability { NET_ADMIN NET_RAW };
+allow siengine_screenshare_rpmsg servicemanager:service_manager find;
+allow siengine_screenshare_rpmsg activity_service:service_manager find;
