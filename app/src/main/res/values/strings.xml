@@ -7,13 +7,12 @@
     <string name="btn_stop">取消投屏（拉回主屏）</string>
 
     <string name="msg_fill_all_fields">请先填写 package_name / activity_path / display_id</string>
-    <string name="msg_fill_pkg_activity">请先填写 package_name / activity_path</string>
     <string name="msg_display_id_invalid">display_id 必须是数字</string>
     <string name="msg_start_success">已拉起到 display %1$d</string>
     <string name="msg_stop_success">已将目标应用拉回主屏 display 0</string>
-    <string name="msg_rpmsg_init_failed">rpmsg init 初始化失败</string>
-    <string name="msg_rpmsg_start_failed">rpmsg start 通知失败，未执行投屏</string>
-    <string name="msg_rpmsg_stop_failed">rpmsg stop 通知失败，未执行拉回主屏</string>
     <string name="msg_start_failed">启动失败：%1$s</string>
     <string name="msg_stop_failed">取消投屏失败：%1$s</string>
+    <string name="msg_service_connected">ScreenShareService 已连接</string>
+    <string name="msg_service_disconnected">ScreenShareService 已断开</string>
+    <string name="msg_service_not_ready">ScreenShareService 尚未就绪</string>
 </resources>
