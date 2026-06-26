@@ -4,6 +4,8 @@ import android.app.ActivityOptions;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.IBinder;
+import android.os.Parcel;
 import android.text.TextUtils;
 import android.util.Log;
 import android.widget.Button;
@@ -12,19 +14,11 @@ import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import java.lang.reflect.Method;
+
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
-
-    static {
-        try {
-            System.loadLibrary("nativeRpmsg");
-            NativeRpmsgBridge.setLibraryLoaded(true);
-        } catch (UnsatisfiedLinkError e) {
-            Log.e(TAG, "Failed to load nativeRpmsg", e);
-            NativeRpmsgBridge.setLibraryLoaded(false);
-        }
-    }
 
     private EditText etPackage;
     private EditText etActivity;
@@ -39,7 +33,7 @@ public class MainActivity extends AppCompatActivity {
         etActivity = findViewById(R.id.etActivity);
         etDisplayId = findViewById(R.id.etDisplayId);
 
-        if (!NativeRpmsgBridge.init()) {
+        if (!RpmsgBinderBridge.init()) {
             toast(getString(R.string.msg_rpmsg_init_failed));
         }
 
@@ -50,10 +44,9 @@ public class MainActivity extends AppCompatActivity {
         btnStop.setOnClickListener(v -> pullBackToMainDisplay());
     }
 
-
     @Override
     protected void onDestroy() {
-        NativeRpmsgBridge.deinit();
+        RpmsgBinderBridge.deinit();
         super.onDestroy();
     }
 
@@ -73,7 +66,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        if (!NativeRpmsgBridge.start()) {
+        if (!RpmsgBinderBridge.start()) {
             toast(getString(R.string.msg_rpmsg_start_failed));
             return;
         }
@@ -105,7 +98,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        if (!NativeRpmsgBridge.stop()) {
+        if (!RpmsgBinderBridge.stop()) {
             toast(getString(R.string.msg_rpmsg_stop_failed));
             return;
         }
@@ -154,74 +147,75 @@ public class MainActivity extends AppCompatActivity {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
 
-    private static final class NativeRpmsgBridge {
-        private static boolean libraryLoaded;
+    private static final class RpmsgBinderBridge {
+        private static final String SERVICE_MANAGER_CLASS = "android.os.ServiceManager";
+        private static final String SERVICE_NAME = "rpmsg_service";
+        private static final String INTERFACE_TOKEN = "android.rpmsg.IRpmsgService";
 
-        private NativeRpmsgBridge() {
-        }
+        private static final int TRANSACTION_INIT = 1;
+        private static final int TRANSACTION_DEINIT = 2;
+        private static final int TRANSACTION_START = 3;
+        private static final int TRANSACTION_STOP = 4;
 
-        static void setLibraryLoaded(boolean loaded) {
-            libraryLoaded = loaded;
-        }
-
-        static boolean deinit() {
-            if (!libraryLoaded) {
-                Log.e(TAG, "nativeRpmsg is not loaded, deinit() skipped");
-                return false;
-            }
-            try {
-                return nativeDeinit();
-            } catch (UnsatisfiedLinkError e) {
-                Log.e(TAG, "nativeRpmsg deinit() call failed", e);
-                return false;
-            }
+        private RpmsgBinderBridge() {
         }
 
         static boolean init() {
-            if (!libraryLoaded) {
-                Log.e(TAG, "nativeRpmsg is not loaded, init() skipped");
-                return false;
-            }
-            try {
-                return nativeInit();
-            } catch (UnsatisfiedLinkError e) {
-                Log.e(TAG, "nativeRpmsg init() call failed", e);
-                return false;
-            }
+            return transact(TRANSACTION_INIT, "init");
+        }
+
+        static boolean deinit() {
+            return transact(TRANSACTION_DEINIT, "deinit");
         }
 
         static boolean start() {
-            if (!libraryLoaded) {
-                Log.e(TAG, "nativeRpmsg is not loaded, start() skipped");
-                return false;
-            }
-            try {
-                return nativeStart();
-            } catch (UnsatisfiedLinkError e) {
-                Log.e(TAG, "nativeRpmsg start() call failed", e);
-                return false;
-            }
+            return transact(TRANSACTION_START, "start");
         }
 
         static boolean stop() {
-            if (!libraryLoaded) {
-                Log.e(TAG, "nativeRpmsg is not loaded, stop() skipped");
+            return transact(TRANSACTION_STOP, "stop");
+        }
+
+        private static boolean transact(int code, String methodName) {
+            IBinder binder = getRpmsgService();
+            if (binder == null) {
+                Log.e(TAG, "rpmsg binder service is null, " + methodName + "() skipped");
                 return false;
             }
+
+            Parcel data = Parcel.obtain();
+            Parcel reply = Parcel.obtain();
             try {
-                return nativeStop();
-            } catch (UnsatisfiedLinkError e) {
-                Log.e(TAG, "nativeRpmsg stop() call failed", e);
+                data.writeInterfaceToken(INTERFACE_TOKEN);
+                boolean status = binder.transact(code, data, reply, 0);
+                if (!status) {
+                    Log.e(TAG, "rpmsg binder transact failed for " + methodName + "(), code=" + code);
+                    return false;
+                }
+                reply.readException();
+                return true;
+            } catch (Exception e) {
+                Log.e(TAG, "rpmsg binder " + methodName + "() call failed", e);
                 return false;
+            } finally {
+                reply.recycle();
+                data.recycle();
             }
         }
 
-        private static native boolean nativeDeinit();
-
-        private static native boolean nativeInit();
-
-        private static native boolean nativeStart();
-
-        private static native boolean nativeStop();
+        private static IBinder getRpmsgService() {
+            try {
+                Class<?> clazz = Class.forName(SERVICE_MANAGER_CLASS);
+                Method getService = clazz.getMethod("getService", String.class);
+                Object service = getService.invoke(null, SERVICE_NAME);
+                if (service instanceof IBinder) {
+                    return (IBinder) service;
+                }
+                return null;
+            } catch (Exception e) {
+                Log.e(TAG, "get rpmsg binder service failed", e);
+                return null;
+            }
+        }
     }
 }
